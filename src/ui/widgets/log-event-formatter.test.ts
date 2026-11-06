@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { parseLog } from "../../domain/log/log-events.ts";
 import {
   EVENT_STYLES,
   formatLogActivity,
@@ -64,5 +65,31 @@ describe("log event formatter", () => {
     );
     expect(experiment.content).toBe("x auc 0.9000 (reported)");
     expect(parallel.content).toContain("auc 0.9000 (reported)");
+  });
+});
+
+describe("log event formatter: events from the log reader", () => {
+  const read = (o: Record<string, unknown>) => {
+    const event = parseLog(JSON.stringify(o)).events[0];
+    if (!event) throw new Error("not read");
+    return event;
+  };
+
+  test("a hypothesis shows its claim, whichever field name wrote it", () => {
+    for (const field of ["claim", "hypothesis", "statement"]) {
+      const activity = formatLogActivity(
+        read({ ts: "t", type: "hypothesis", id: "H-1", [field]: "the text" }),
+        0,
+      );
+      expect(activity.content).toBe("H-1: the text");
+    }
+  });
+
+  test("an unknown event type shows its original type", () => {
+    const activity = formatLogActivity(
+      read({ ts: "t", type: "monitor", kernel: "k" }),
+      0,
+    );
+    expect(activity.content).toBe("monitor");
   });
 });

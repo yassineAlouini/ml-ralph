@@ -3,7 +3,10 @@
  * Matches the visual structure of hypotheses-panel.tsx
  */
 
-import type { ResearchEvent } from "../../infrastructure/ralph/index.ts";
+import type { TypedLogEvent } from "../../domain/log/log-events.ts";
+
+type ResearchEvent = TypedLogEvent<"research">;
+
 import { Box, Text } from "../ink.tsx";
 import { colors } from "../theme/colors.ts";
 
@@ -91,8 +94,10 @@ function getSourceConfig(source: string): {
 /**
  * Format relative time
  */
-function formatRelativeTime(dateStr: string): string {
+function formatRelativeTime(dateStr: string | undefined): string {
+  if (!dateStr) return "-";
   const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return "-";
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -132,7 +137,7 @@ export function ResearchPanel({
 
   // Sort by timestamp descending (newest first)
   const sortedResearch = [...research].sort(
-    (a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime(),
+    (a, b) => b.meta.line - a.meta.line,
   );
 
   const total = sortedResearch.length;
@@ -156,7 +161,7 @@ export function ResearchPanel({
 
       {/* Research list */}
       {displayResearch.map((item, index) => (
-        <ResearchCard key={`${item.ts}-${index}`} item={item} />
+        <ResearchCard key={`${item.meta.line}-${index}`} item={item} />
       ))}
     </Box>
   );
@@ -170,11 +175,7 @@ function ResearchCard({ item }: ResearchCardProps) {
   const config = getSourceConfig(item.source);
   const timeAgo = formatRelativeTime(item.ts);
 
-  // Type-safe access to optional fields
-  const extendedItem = item as ResearchEvent & {
-    url?: string;
-    key_insights?: string[];
-  };
+  const extendedItem = item;
 
   return (
     <Box
@@ -205,7 +206,7 @@ function ResearchCard({ item }: ResearchCardProps) {
       {/* Source name */}
       <Box marginBottom={1}>
         <Text color={colors.text} bold>
-          {item.source}
+          {item.source || "(no source)"}
         </Text>
       </Box>
 

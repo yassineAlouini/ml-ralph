@@ -498,7 +498,31 @@ kill_criterion: missing required field, expected non-empty string
 
 An unknown type, JSON that does not parse or is not an object, a `type` in the JSON that differs from the argument, and runner-only types (`promotion`, `verifier_verdict`, `contract_relocked`, `eval`, `candidate_rejected`, `overfitting`, `holdout_access`, `run_complete`, `completion_rejected`, `completion_blocked`) are rejected the same way. Fields not in the schema are kept.
 
-The runner's own appends (`appendValidatedEvent` in `log-command.ts`: `phase`, `eval`, `promotion`, `verifier_verdict`, `overfitting`, `contract_relocked`, completion and holdout events) pass the same schemas. An event that fails is not appended; it is shown as an error line in the TUI and written to stderr (the helper itself writes to stderr only when the caller gives no callback). Lines already in a log that would fail today are still read: the parser and panels do not validate.
+The runner's own appends (`appendValidatedEvent` in `log-command.ts`: `phase`, `eval`, `promotion`, `verifier_verdict`, `overfitting`, `contract_relocked`, completion and holdout events) pass the same schemas. An event that fails is not appended; it is shown as an error line in the TUI and written to stderr (the helper itself writes to stderr only when the caller gives no callback). Lines already in a log that would fail today are still read (see Reading the log below).
+
+### Reading the log
+
+Every reader of `log.jsonl` on the TUI side goes through `parseLog(text)` / `parseLogLine(line, lineNo)` in `domain/log/log-events.ts`. Writes are strict; reads are lenient, because a log holds history written by older versions, by hand, or by other agents.
+
+- **Log event**: a line that parses to a JSON object with a string `type`. It comes back typed by its schema (the types are inferred from `LOG_EVENT_SCHEMAS`, so there is one description of each event). Missing or invalid fields are filled with defaults (`''` for strings, `[]` for lists, `{}` for objects, `undefined` for numbers and enum values) and each repair is recorded as an **issue** (`"<field>: <problem>"`). The line number, issues and the original object are in `meta: { line, issues, raw }`. A type with no schema comes back as `{ type: "unknown", originalType }`.
+- **Rejected line**: a non-blank line that is not JSON, not an object, or has no `type`. It is returned with its line number and a reason, never dropped silently.
+- **Upgrade table**: old field names read as the current ones before the schema check. A current field always wins over its alias.
+
+| Event type | Current field | Read from (in order) |
+|---|---|---|
+| every type | `ts` | `timestamp`, `at` |
+| `hypothesis` | `claim` | `statement`, `hypothesis` |
+| `hypothesis` | `kill_criterion` | `rule` |
+| `experiment` | `hypothesis_id` | `id` |
+| `experiment` | `observations` | `result` |
+| `decision` | `action` | `choice` |
+| `decision` | `reason` | `what` |
+
+A free-form decision `action` whose leading word is clear is read as a schema action, with an issue: `abandon`/`kill`/`close`/`reject`/`drop` as `reject`, `adopt`/`accept`/`promote`/`keep` as `keep`, `continue`/`extend`/`iterate` as `iterate`, `pivot` as `pivot`. Others read as `undefined`.
+
+Events keep file order; `ts` is never used for sorting (hand-typed or out-of-order timestamps are common). The knowledge panel header shows how many lines were skipped and how many events have issues, and each panel is wrapped in a `PanelBoundary` so a render error shows `<panel> panel failed: <message>` instead of closing the TUI.
+
+`ML_RALPH_LOG_CORPUS="<glob>" bun test log-corpus` reads real logs end to end (no line lost, no reader throws); it is skipped when the variable is unset.
 
 ### Hypothesis
 
@@ -514,7 +538,7 @@ interface HypothesisEvent {
 }
 ```
 
-A hypothesis is rejected unless `id`, `claim`, `expected_delta`, `rubrics` (at least one) and `kill_criterion` are present with these types. Logs written before this schema may hold `hypothesis` and `expected` strings instead of `claim` and `expected_delta`; the log parser still reads them.
+A hypothesis is rejected unless `id`, `claim`, `expected_delta`, `rubrics` (at least one) and `kill_criterion` are present with these types. Logs written before this schema may hold `hypothesis` and `expected` strings instead of `claim` and `expected_delta`; the reader reads `hypothesis` as `claim`, and the hypotheses panel shows the old `expected` text when there is no `expected_delta`.
 
 ### Required fields by type
 

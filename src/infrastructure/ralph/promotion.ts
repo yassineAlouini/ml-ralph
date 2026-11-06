@@ -3,6 +3,7 @@
  */
 
 import { rename } from "node:fs/promises";
+import type { TypedLogEvent } from "../../domain/log/log-events.ts";
 import {
   type EvalContract,
   validateEvalContract,
@@ -19,11 +20,7 @@ import {
   type InvalidRunnerEvent,
 } from "./log-command.ts";
 import { readLogFile } from "./log-parser.ts";
-import type {
-  EvalEvent,
-  HypothesisEvent,
-  PromotionEvent,
-} from "./templates.ts";
+import type { PromotionEvent } from "./templates.ts";
 import { type VerifyCandidateOptions, verifyCandidate } from "./verifier.ts";
 
 export const INCUMBENT_PATH = ".ml-ralph/incumbent.json";
@@ -335,10 +332,10 @@ async function judge(
   // The runner's own record of the eval, from this iteration
   const events = await readLogFile(projectPath);
   const evalEvent = events.find(
-    (e): e is EvalEvent =>
+    (e): e is TypedLogEvent<"eval"> =>
       e.type === "eval" &&
       e.eval_id === claimedEvalId &&
-      e.ts >= iterationStartedAt,
+      (e.ts ?? "") >= iterationStartedAt,
   );
   if (!evalEvent) {
     return reject(
@@ -514,19 +511,17 @@ function pickHypothesis(
   iterationStartedAt: string,
 ): VerifyCandidateOptions["hypothesis"] | null {
   const hypotheses = events.filter(
-    (e): e is HypothesisEvent =>
+    (e): e is TypedLogEvent<"hypothesis"> =>
       e.type === "hypothesis" &&
       Array.isArray(e.rubrics) &&
       e.rubrics.length > 0,
   );
-  const recent = hypotheses.filter((h) => h.ts >= iterationStartedAt);
+  const recent = hypotheses.filter((h) => (h.ts ?? "") >= iterationStartedAt);
   const chosen = recent.length > 0 ? recent : hypotheses.slice(-1);
   if (chosen.length === 0) return null;
   return {
     id: chosen.map((h) => h.id).join(", "),
-    hypothesis: chosen
-      .map((h) => `${h.id}: ${h.claim ?? h.hypothesis ?? ""}`)
-      .join("\n"),
+    hypothesis: chosen.map((h) => `${h.id}: ${h.claim}`).join("\n"),
     rubrics: chosen.flatMap((h) => h.rubrics),
   };
 }

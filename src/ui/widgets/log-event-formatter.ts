@@ -1,9 +1,9 @@
 /**
- * Log Event Formatter - converts RalphEvents into Activity items
+ * Log Event Formatter - converts log events into Activity items
  * for display in the ActivityFeed.
  */
 
-import type { RalphEvent } from "../../infrastructure/ralph/templates.ts";
+import type { LogEvent } from "../../domain/log/log-events.ts";
 import type { Activity } from "./activity-aggregator.ts";
 
 export interface LogEventStyle {
@@ -106,9 +106,9 @@ function primaryMetric(metrics: Record<string, unknown>): string {
 }
 
 /**
- * Format a RalphEvent into a compact single-line string (ASCII-safe).
+ * Format a log event into a compact single-line string (ASCII-safe).
  */
-function formatContent(event: RalphEvent): string {
+function formatContent(event: LogEvent): string {
   try {
     const e = event as unknown as Record<string, unknown>;
     switch (event.type) {
@@ -116,7 +116,10 @@ function formatContent(event: RalphEvent): string {
         return `${e.phase ?? "?"} ${e.summary ?? ""}`;
 
       case "hypothesis":
-        return `${e.id ?? "?"}: ${e.hypothesis ?? ""}`;
+        return `${event.id || "?"}: ${event.claim}`;
+
+      case "unknown":
+        return event.originalType;
 
       case "experiment": {
         const metrics = (e.metrics ?? {}) as Record<string, unknown>;
@@ -224,9 +227,9 @@ function formatContent(event: RalphEvent): string {
 }
 
 /**
- * Convert a RalphEvent to an Activity for the feed.
+ * Convert a log event to an Activity for the feed.
  */
-export function formatLogActivity(event: RalphEvent, index: number): Activity {
+export function formatLogActivity(event: LogEvent, index: number): Activity {
   const style = EVENT_STYLES[event.type] || { icon: ".", color: "textMuted" };
   const content = sanitizeLogText(formatContent(event));
   const parsed = event.ts ? new Date(event.ts).getTime() : NaN;

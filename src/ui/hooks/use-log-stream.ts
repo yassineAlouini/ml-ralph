@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RalphEvent } from "../../infrastructure/ralph/templates.ts";
+import { type LogEvent, parseLogLine } from "../../domain/log/log-events.ts";
 
 /** Maximum number of events kept in memory */
 const MAX_EVENTS = 10_000;
@@ -16,28 +16,16 @@ export interface UseLogStreamOptions {
 }
 
 export interface UseLogStreamResult {
-  /** All parsed events so far */
-  events: RalphEvent[];
-}
-
-/**
- * Parse a single line of JSONL into a RalphEvent
- */
-function parseLine(line: string): RalphEvent | null {
-  try {
-    const trimmed = line.trim();
-    if (!trimmed) return null;
-    return JSON.parse(trimmed) as RalphEvent;
-  } catch {
-    return null;
-  }
+  /** Events read so far, in file order (the last MAX_EVENTS) */
+  events: LogEvent[];
 }
 
 export function useLogStream(options: UseLogStreamOptions): UseLogStreamResult {
   const { projectPath, pollInterval = 1000 } = options;
 
-  const [events, setEvents] = useState<RalphEvent[]>([]);
+  const [events, setEvents] = useState<LogEvent[]>([]);
   const lastByteOffset = useRef(0);
+  const lineCount = useRef(0);
   const partialLine = useRef("");
   const polling = useRef(false);
   const prevPath = useRef(projectPath);
@@ -46,6 +34,7 @@ export function useLogStream(options: UseLogStreamOptions): UseLogStreamResult {
   if (prevPath.current !== projectPath) {
     prevPath.current = projectPath;
     lastByteOffset.current = 0;
+    lineCount.current = 0;
     partialLine.current = "";
     setEvents([]);
   }
@@ -82,12 +71,11 @@ export function useLogStream(options: UseLogStreamOptions): UseLogStreamResult {
         partialLine.current = "";
       }
 
-      const newEvents: RalphEvent[] = [];
+      const newEvents: LogEvent[] = [];
       for (const line of lines) {
-        const event = parseLine(line);
-        if (event) {
-          newEvents.push(event);
-        }
+        lineCount.current += 1;
+        const parsed = parseLogLine(line, lineCount.current);
+        if (parsed?.kind === "event") newEvents.push(parsed.event);
       }
 
       if (newEvents.length > 0) {

@@ -10,6 +10,7 @@ import { Box, Text } from "../ink.tsx";
 import { colors } from "../theme/colors.ts";
 import { ActivityFeed } from "../widgets/activity-feed.tsx";
 import { KnowledgePanel } from "../widgets/knowledge-panel.tsx";
+import { PanelBoundary } from "../widgets/panel-boundary.tsx";
 
 interface MonitorScreenProps {
   currentIteration?: number;
@@ -59,13 +60,15 @@ export function MonitorScreen({
           </Text>
         </Box>
         <Box flexDirection="column" paddingX={1} flexGrow={1} overflow="hidden">
-          <ActivityFeed
-            logEvents={logEvents}
-            currentIteration={currentIteration}
-            startTime={startTime}
-            isRunning={agentStatus === "running"}
-            scrollActive={scrollActive}
-          />
+          <PanelBoundary name="activity">
+            <ActivityFeed
+              logEvents={logEvents}
+              currentIteration={currentIteration}
+              startTime={startTime}
+              isRunning={agentStatus === "running"}
+              scrollActive={scrollActive}
+            />
+          </PanelBoundary>
         </Box>
       </Box>
 

@@ -84,9 +84,9 @@ export type {
 export {
   aggregateEvents,
   readKanbanFile,
+  readLog,
   readLogFile,
   readPrdFile,
-  watchLogFile,
 } from "./log-parser.ts";
 export type {
   GitHead,

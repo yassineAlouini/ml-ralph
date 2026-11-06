@@ -3,6 +3,10 @@
  */
 
 import pkg from "../../../package.json" with { type: "json" };
+import type {
+  LogEventType,
+  WrittenLogEvent,
+} from "../../domain/validation/log-event.ts";
 
 /** How the agent runs `ml-ralph log`, pinned to the version whose CLI has the command */
 export const LOG_COMMAND = `bunx @pentoai/ml-ralph@${pkg.version} log`;
@@ -1244,410 +1248,55 @@ export const DEFAULT_KANBAN = {
   abandoned: [],
 };
 
-// Event type definitions for TypeScript
+// Event types are inferred from LOG_EVENT_SCHEMAS (domain/validation/log-event.ts),
+// the one description of what a log.jsonl event holds.
 export interface BaseEvent {
   ts: string;
   type: string;
 }
 
-export interface PhaseEvent extends BaseEvent {
-  type: "phase";
-  phase: "UNDERSTAND" | "STRATEGIZE" | "EXECUTE" | "REFLECT";
-  summary: string;
-}
+export type PhaseEvent = WrittenLogEvent<"phase">;
+export type ThinkingEvent = WrittenLogEvent<"thinking">;
+export type MentalModelEvent = WrittenLogEvent<"mental_model">;
+export type ResearchEvent = WrittenLogEvent<"research">;
+export type PathAnalysisEvent = WrittenLogEvent<"path_analysis">;
+export type DataVerifiedEvent = WrittenLogEvent<"data_verified">;
+export type ResultVerificationEvent = WrittenLogEvent<"result_verification">;
+export type SuccessVerifiedEvent = WrittenLogEvent<"success_verified">;
+export type HypothesisEvent = WrittenLogEvent<"hypothesis">;
+export type ExperimentEvent = WrittenLogEvent<"experiment">;
+export type EvalEvent = WrittenLogEvent<"eval">;
+export type TagFailedEvent = WrittenLogEvent<"tag_failed">;
+export type VerifierVerdictEvent = WrittenLogEvent<"verifier_verdict">;
+export type PromotionEvent = WrittenLogEvent<"promotion">;
+export type CandidateRejectedEvent = WrittenLogEvent<"candidate_rejected">;
+export type OverfittingEvent = WrittenLogEvent<"overfitting">;
+export type RunCompleteEvent = WrittenLogEvent<"run_complete">;
+export type CompletionRejectedEvent = WrittenLogEvent<"completion_rejected">;
+export type CompletionBlockedEvent = WrittenLogEvent<"completion_blocked">;
+export type BudgetStatusEvent = WrittenLogEvent<"budget_status">;
+export type BudgetWarningEvent = WrittenLogEvent<"budget_warning">;
+export type BudgetExhaustedEvent = WrittenLogEvent<"budget_exhausted">;
+export type ReportFailedEvent = WrittenLogEvent<"report_failed">;
+export type HoldoutAccessEvent = WrittenLogEvent<"holdout_access">;
+export type ContractRelockedEvent = WrittenLogEvent<"contract_relocked">;
+export type LearningEvent = WrittenLogEvent<"learning">;
+export type ConclusionsChangedEvent = WrittenLogEvent<"conclusions_changed">;
+export type ConclusionsRejectedEvent = WrittenLogEvent<"conclusions_rejected">;
+export type JobStoppedEvent = WrittenLogEvent<"job_stopped">;
+export type DecisionEvent = WrittenLogEvent<"decision">;
+export type StrategicRetreatEvent = WrittenLogEvent<"strategic_retreat">;
+export type PrdUpdatedEvent = WrittenLogEvent<"prd_updated">;
+export type StatusEvent = WrittenLogEvent<"status">;
+export type KanbanUpdatedEvent = WrittenLogEvent<"kanban_updated">;
+export type ParallelStartEvent = WrittenLogEvent<"parallel_start">;
+export type ParallelResultEvent = WrittenLogEvent<"parallel_result">;
+export type ParallelSynthesisEvent = WrittenLogEvent<"parallel_synthesis">;
 
-export interface ThinkingEvent extends BaseEvent {
-  type: "thinking";
-  subject: string;
-  thoughts: string;
-  conclusion: string;
-}
-
-export interface MentalModelEvent extends BaseEvent {
-  type: "mental_model";
-  domain: string;
-  belief: string;
-  confidence: "high" | "medium" | "low";
-  evidence: string[];
-}
-
-export interface ResearchEvent extends BaseEvent {
-  type: "research";
-  source: string;
-  insight: string;
-  url?: string;
-  key_insights?: string[];
-  relevance?: string;
-}
-
-export interface PathAnalysisEvent extends BaseEvent {
-  type: "path_analysis";
-  paths: Array<{
-    id: string;
-    description: string;
-    expected: string;
-    learning_value: string;
-  }>;
-  chosen: string;
-  rationale: string;
-}
-
-export interface DataVerifiedEvent extends BaseEvent {
-  type: "data_verified";
-  dataset: string;
-  checks: string[];
-  issues: string[];
-  action: string;
-}
-
-export interface ResultVerificationEvent extends BaseEvent {
-  type: "result_verification";
-  result: string;
-  verification_attempts: Array<{
-    check: string;
-    method: string;
-    finding: string;
-  }>;
-  conclusion: string;
-}
-
-export interface SuccessVerifiedEvent extends BaseEvent {
-  type: "success_verified";
-  criteria_met: string[];
-  verification_checks: string[];
-  attempts_to_break: string[];
-  conclusion: string;
-}
-
-export interface HypothesisEvent extends BaseEvent {
-  type: "hypothesis";
-  id: string;
-  /** Falsifiable claim */
-  claim: string;
-  /** Expected change in the primary metric vs the incumbent (signed, metric units) */
-  expected_delta: number;
-  /** Implementation checks the verifier applies to the diff */
-  rubrics: string[];
-  /** Result that kills the hypothesis */
-  kill_criterion: string;
-  rationale?: string;
-  /** Events logged before the typed schema used these */
-  hypothesis?: string;
-  expected?: string;
-}
-
-export interface ExperimentEvent extends BaseEvent {
-  type: "experiment";
-  name: string; // Descriptive name like "autoencoder-semantic-features"
-  hypothesis_id: string;
-  eval_id?: string; // Runner eval (ml-ralph eval) behind the metrics; without it the TUI shows them as unverified
-  wandb_run_id?: string; // wandb run ID for linking
-  wandb_url?: string; // Full wandb URL
-  config?: Record<string, unknown>; // Hyperparameters and settings
-  metrics: Record<string, number>; // Final metrics
-  observations?: string;
-  surprises?: string;
-}
-
-/** Written by the runner (never the agent) after each `ml-ralph eval` run */
-export interface EvalEvent extends BaseEvent {
-  type: "eval";
-  eval_id: string;
-  status: "ok" | "failed";
-  candidate: string;
-  /** HEAD commit the candidate was scored at; absent outside a git repository */
-  sha?: string;
-  /** Mean and std of the per-seed scores; only when status is "ok" */
-  mean?: number;
-  std?: number;
-  /** Why the eval failed; only when status is "failed" */
-  reason?: string;
-}
-
-/** Written by the runner (never the agent) when it could not move the ralph/best tag; the promotion stands */
-export interface TagFailedEvent extends BaseEvent {
-  type: "tag_failed";
-  tag: string;
-  sha: string;
-  eval_id: string;
-  error: string;
-}
-
-/** Written by the runner (never the agent) after each independent verifier run */
-export interface VerifierVerdictEvent extends BaseEvent {
-  type: "verifier_verdict";
-  id: string;
-  verdict: "approve" | "reject";
-  /** "unknown" when the verifier failed to produce a usable answer */
-  checks: Record<
-    "leakage" | "protocol_change" | "rubrics",
-    "pass" | "fail" | "unknown"
-  >;
-  reason: string;
-  model?: string;
-  /** total_cost_usd the verifier session reported; counted against max_usd */
-  cost_usd?: number;
-  output_path: string;
-}
-
-/** Written by the runner (never the agent) after it judges a `<candidate_complete>` */
-export interface PromotionEvent extends BaseEvent {
-  type: "promotion";
-  verdict: "promoted" | "rejected";
-  /** One line; the same text the agent sees in its next prompt */
-  reason: string;
-  /** The eval_id the agent named in its tag; absent when it named none */
-  candidate_eval_id?: string;
-  /** The incumbent the candidate was compared with; absent when compared with baseline_score */
-  incumbent_eval_id?: string;
-  /** The verifier_verdict event this decision used; absent when the verifier did not run */
-  verifier_id?: string;
-  /** Mean from the candidate's metrics.json */
-  candidate_mean?: number;
-  /** Incumbent's mean from its metrics.json, or baseline_score without an incumbent */
-  reference_mean?: number;
-}
-
-/** Written by the runner (never the agent) when a `<candidate_complete>` arrives before the eval contract is locked; no eval can exist yet, so no candidate is judged */
-export interface CandidateRejectedEvent extends BaseEvent {
-  type: "candidate_rejected";
-  reason: "eval_not_locked";
-  /** The eval_id the agent named in its tag, if any */
-  eval_id?: string;
-}
-
-/** Written by the runner (never the agent) when a candidate's holdout gap exceeds holdout_gap_threshold */
-export interface OverfittingEvent extends BaseEvent {
-  type: "overfitting";
-  eval_id: string;
-  /** holdout_gap_threshold from the locked contract. No scores: the agent reads this log */
-  threshold: number;
-}
-
-/** Written by the runner (never the agent) when a promoted candidate passes the verifier and the sealed holdout; the run ends */
-export interface RunCompleteEvent extends BaseEvent {
-  type: "run_complete";
-  eval_id: string;
-  search_score: number;
-  /** The only place a holdout score is written into the project: the run is over when this is logged */
-  holdout_score: number;
-  verifier_verdict: "approve";
-  verifier_id: string;
-}
-
-/** Written by the runner (never the agent) when the completion check fails; the run continues */
-export interface CompletionRejectedEvent extends BaseEvent {
-  type: "completion_rejected";
-  eval_id: string;
-  reason: "verifier_rejected" | "holdout_failed" | "overfitting_gap";
-  /** One line, without scores */
-  detail: string;
-  verifier_id?: string;
-}
-
-/** Written by the runner (never the agent) when the completion check could not run; the run continues */
-export interface CompletionBlockedEvent extends BaseEvent {
-  type: "completion_blocked";
-  eval_id: string;
-  reason:
-    | "holdout_not_configured"
-    | "holdout_unavailable"
-    | "holdout_already_scored"
-    | "verifier_error"
-    | "holdout_error"
-    | "completion_error";
-  error: string;
-}
-
-/** Written by the runner (never the agent) after each iteration: running totals for the run and every cap that is set */
-export interface BudgetStatusEvent extends BaseEvent {
-  type: "budget_status";
-  run_id: string;
-  iteration: number;
-  /** Summed total_cost_usd of the claude result events, including earlier starts of the same run */
-  usd_spent: number;
-  elapsed_minutes: number;
-  max_usd?: number;
-  max_wall_clock_minutes?: number;
-  max_experiments_per_iteration?: number;
-}
-
-/** Written by the runner (never the agent) when an iteration reported no total_cost_usd; it counted as $0 */
-export interface BudgetWarningEvent extends BaseEvent {
-  type: "budget_warning";
-  run_id: string;
-  iteration: number;
-  reason: string;
-}
-
-/** Written by the runner (never the agent) when max_usd or max_wall_clock_minutes is reached; the run ends with reason budget_exhausted */
-export interface BudgetExhaustedEvent extends BaseEvent {
-  type: "budget_exhausted";
-  run_id: string;
-  iteration: number;
-  cap: "usd" | "wall_clock";
-  usd_spent: number;
-  elapsed_minutes: number;
-  max_usd?: number;
-  max_wall_clock_minutes?: number;
-  max_experiments_per_iteration?: number;
-}
-
-/** Written by the runner (never the agent) when report.md could not be written; the run still ends */
-export interface ReportFailedEvent extends BaseEvent {
-  type: "report_failed";
-  run_id: string;
-  reason: string;
-}
-
-/** Written by the runner (never the agent) when a tool call named the sealed holdout path; the run ends with reason holdout_access */
-export interface HoldoutAccessEvent extends BaseEvent {
-  type: "holdout_access";
-  /** Name of the tool whose input contained the holdout path (never the input itself) */
-  tool: string;
-  iteration: number;
-}
-
-/** Written by the runner (never the agent) when the user re-locks the eval files after a change */
-export interface ContractRelockedEvent extends BaseEvent {
-  type: "contract_relocked";
-  /** The locked files that differed from the lock when the run paused */
-  changes: Array<{
-    file: "evaluate.py" | "contract.json";
-    kind: "edited" | "deleted";
-  }>;
-  /** The new SHA-256 hashes now in lock.json */
-  files: Record<"evaluate.py" | "contract.json", string>;
-}
-
-export interface LearningEvent extends BaseEvent {
-  type: "learning";
-  insight: string;
-  source?: string;
-}
-
-export interface ConclusionsChangedEvent extends BaseEvent {
-  type: "conclusions_changed";
-  reason:
-    | "contradiction"
-    | "new_category"
-    | "flipped_recommendation"
-    | "refinement";
-  summary: string;
-}
-
-/** Written by the runner (never the agent) when it restored conclusions.md after a rule-breaking edit */
-export interface ConclusionsRejectedEvent extends BaseEvent {
-  type: "conclusions_rejected";
-  reason: "too_long" | "no_justification";
-  detail: string;
-  words: number;
-}
-
-/** Written by the runner (never the agent) when the user stops a training job from the TUI */
-export interface JobStoppedEvent extends BaseEvent {
-  type: "job_stopped";
-  job_id: string;
-  pid: number;
-  command: string;
-  outcome: "stopped" | "not_running" | "error";
-  message: string;
-}
-
-export interface DecisionEvent extends BaseEvent {
-  type: "decision";
-  hypothesis_id: string;
-  action: "keep" | "reject" | "iterate" | "pivot";
-  reason: string;
-  next_step?: string;
-}
-
-export interface StrategicRetreatEvent extends BaseEvent {
-  type: "strategic_retreat";
-  trigger: string;
-  action: string;
-  focus: string;
-}
-
-export interface PrdUpdatedEvent extends BaseEvent {
-  type: "prd_updated";
-  field: string;
-  change: string;
-  reason: string;
-}
-
-export interface StatusEvent extends BaseEvent {
-  type: "status";
-  status: "running" | "paused" | "complete";
-  reason?: string;
-}
-
-export interface KanbanUpdatedEvent extends BaseEvent {
-  type: "kanban_updated";
-  changes: string;
-  reason: string;
-}
-
-export interface ParallelStartEvent extends BaseEvent {
-  type: "parallel_start";
-  team: string;
-  hypotheses: string[];
-  reason: string;
-}
-
-export interface ParallelResultEvent extends BaseEvent {
-  type: "parallel_result";
-  hypothesis_id: string;
-  agent: string;
-  metrics: Record<string, number>;
-  branch: string;
-}
-
-export interface ParallelSynthesisEvent extends BaseEvent {
-  type: "parallel_synthesis";
-  winner: string;
-  reason: string;
-  merged_branch: string;
-}
-
-export type RalphEvent =
-  | PhaseEvent
-  | ThinkingEvent
-  | MentalModelEvent
-  | ResearchEvent
-  | PathAnalysisEvent
-  | DataVerifiedEvent
-  | ResultVerificationEvent
-  | SuccessVerifiedEvent
-  | HypothesisEvent
-  | ExperimentEvent
-  | EvalEvent
-  | LearningEvent
-  | ConclusionsChangedEvent
-  | ConclusionsRejectedEvent
-  | DecisionEvent
-  | VerifierVerdictEvent
-  | PromotionEvent
-  | TagFailedEvent
-  | CandidateRejectedEvent
-  | OverfittingEvent
-  | RunCompleteEvent
-  | CompletionRejectedEvent
-  | CompletionBlockedEvent
-  | BudgetStatusEvent
-  | BudgetWarningEvent
-  | BudgetExhaustedEvent
-  | ReportFailedEvent
-  | HoldoutAccessEvent
-  | ContractRelockedEvent
-  | JobStoppedEvent
-  | StrategicRetreatEvent
-  | PrdUpdatedEvent
-  | StatusEvent
-  | KanbanUpdatedEvent
-  | ParallelStartEvent
-  | ParallelResultEvent
-  | ParallelSynthesisEvent;
+/** Any event as written to log.jsonl */
+export type RalphEvent = {
+  [T in LogEventType]: WrittenLogEvent<T>;
+}[LogEventType];
 
 export interface PRD {
   project: string;

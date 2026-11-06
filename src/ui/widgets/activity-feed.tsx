@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RalphEvent } from "../../infrastructure/ralph/templates.ts";
+import type { LogEvent } from "../../domain/log/log-events.ts";
 import { Box, Text, useInput, useStdout } from "../ink.tsx";
 import { colors } from "../theme/colors.ts";
 import { CognitiveMap } from "./cognitive-map.tsx";
@@ -162,7 +162,7 @@ interface ActivityVisualLine {
 const PAGE_SIZE = 5;
 
 interface ActivityFeedProps {
-  logEvents?: RalphEvent[];
+  logEvents?: LogEvent[];
   /** Max visible text lines (default 25) */
   maxVisible?: number;
   currentIteration?: number;
