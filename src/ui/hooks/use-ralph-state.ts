@@ -13,7 +13,7 @@ import {
   type PRD,
   readEvalScoring,
   readKanbanFile,
-  readLogFile,
+  readLog,
   readPrdFile,
   readVerifiedEvals,
   type VerifiedEvals,
@@ -65,8 +65,8 @@ export function useRalphState(
       setPrd(prdData);
 
       // Read and aggregate log
-      const events = await readLogFile(projectPath);
-      const summary = aggregateEvents(events);
+      const { events, rejected } = await readLog(projectPath);
+      const summary = aggregateEvents(events, rejected);
       setLog(summary);
 
       // Read Kanban

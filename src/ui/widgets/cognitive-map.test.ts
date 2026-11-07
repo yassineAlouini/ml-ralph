@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { parseLog } from "../../domain/log/log-events.ts";
 import { colors } from "../theme/colors.ts";
 import { __testing } from "./cognitive-map.tsx";
 import { sanitizeLogText } from "./log-event-formatter.ts";
@@ -54,5 +55,20 @@ describe("cognitive map rendering", () => {
       expect(line.text).not.toContain("*");
       expect(line.color).not.toBe(colors.accentGreen);
     }
+  });
+});
+
+describe("cognitive map: events from the log reader", () => {
+  test("hypothesis text comes from claim, including old field names", () => {
+    const { events } = parseLog(
+      [
+        { ts: "t", type: "hypothesis", id: "H-1", claim: "new" },
+        { ts: "t", type: "hypothesis", id: "H-2", hypothesis: "old" },
+      ]
+        .map((e) => JSON.stringify(e))
+        .join("\n"),
+    );
+    const state = __testing.extractCognitiveState(events);
+    expect(state.hypotheses.map((h) => h.text)).toEqual(["new", "old"]);
   });
 });

@@ -6,41 +6,66 @@ import type { ValidationError } from "./prd.ts";
 
 /** Shape of a field value. Describes itself for error messages. */
 export type FieldSpec =
-  | { kind: "string" }
-  | { kind: "number" }
-  | { kind: "enum"; values: readonly string[] }
-  | { kind: "array"; items: FieldSpec; nonEmpty?: boolean }
-  | { kind: "object"; fields: Record<string, Field> }
-  | { kind: "numberMap" }
-  | { kind: "oneOf"; options: FieldSpec[] };
+  | { readonly kind: "string" }
+  | { readonly kind: "number" }
+  | { readonly kind: "enum"; readonly values: readonly string[] }
+  | {
+      readonly kind: "array";
+      readonly items: FieldSpec;
+      readonly nonEmpty?: boolean;
+    }
+  | {
+      readonly kind: "object";
+      readonly fields: Readonly<Record<string, Field>>;
+    }
+  | { readonly kind: "numberMap" }
+  | { readonly kind: "oneOf"; readonly options: readonly FieldSpec[] };
 
 export interface Field {
-  spec: FieldSpec;
-  optional?: boolean;
+  readonly spec: FieldSpec;
+  readonly optional?: boolean;
 }
 
 export interface LogEventSchema {
   /** Written by the runner only; the `ml-ralph log` command refuses it */
-  runnerOnly?: boolean;
-  fields: Record<string, Field>;
+  readonly runnerOnly?: boolean;
+  readonly fields: Readonly<Record<string, Field>>;
 }
 
-const str: Field = { spec: { kind: "string" } };
-const num: Field = { spec: { kind: "number" } };
-const oneOf = (...values: string[]): Field => ({
-  spec: { kind: "enum", values },
-});
-const strings = (nonEmpty = false): Field => ({
-  spec: { kind: "array", items: { kind: "string" }, nonEmpty },
-});
-const objects = (fields: Record<string, Field>, nonEmpty = false): Field => ({
-  spec: { kind: "array", items: { kind: "object", fields }, nonEmpty },
-});
-const metrics: Field = { spec: { kind: "numberMap" } };
-const optional = (field: Field): Field => ({ ...field, optional: true });
+// The helpers keep literal types so event types can be inferred from the
+// schemas below (see InferFields); the schemas stay the one source of truth.
+const str = { spec: { kind: "string" } } as const;
+const num = { spec: { kind: "number" } } as const;
+const oneOf = <const V extends readonly string[]>(...values: V) =>
+  ({ spec: { kind: "enum", values } }) as const;
+const strings = <const N extends boolean = false>(nonEmpty?: N) =>
+  ({
+    spec: {
+      kind: "array",
+      items: { kind: "string" },
+      nonEmpty: (nonEmpty ?? false) as N,
+    },
+  }) as const;
+const objects = <
+  const F extends Record<string, Field>,
+  const N extends boolean = false,
+>(
+  fields: F,
+  nonEmpty?: N,
+) =>
+  ({
+    spec: {
+      kind: "array",
+      items: { kind: "object", fields },
+      nonEmpty: (nonEmpty ?? false) as N,
+    },
+  }) as const;
+const metrics = { spec: { kind: "numberMap" } } as const;
+const optional = <const F extends Field>(field: F) =>
+  ({ ...field, optional: true }) as const;
 
 /** Schemas for every event type documented in templates.ts, by type name */
-export const LOG_EVENT_SCHEMAS: Record<string, LogEventSchema> = {
+export const LOG_EVENT_SCHEMAS = {
   phase: {
     fields: {
       phase: oneOf("UNDERSTAND", "STRATEGIZE", "EXECUTE", "REFLECT"),
@@ -336,7 +361,51 @@ export const LOG_EVENT_SCHEMAS: Record<string, LogEventSchema> = {
       model: optional(str),
     },
   },
-};
+} as const satisfies Record<string, LogEventSchema>;
+
+/** Every event type that has a schema */
+export type LogEventType = keyof typeof LOG_EVENT_SCHEMAS;
+
+/** The schemas widened to a lookup by any string (for runtime checks) */
+const SCHEMAS: Readonly<Record<string, LogEventSchema>> = LOG_EVENT_SCHEMAS;
+
+type Simplify<T> = { [K in keyof T]: T[K] } & {};
+type SpecOf<F> = F extends { spec: infer S } ? S : never;
+type OptionalKeys<F> = {
+  [K in keyof F]: F[K] extends { optional: true } ? K : never;
+}[keyof F];
+type RequiredKeys<F> = Exclude<keyof F, OptionalKeys<F>>;
+
+/** The TypeScript type of a value that passes a field spec */
+export type InferSpec<S> = S extends { kind: "string" }
+  ? string
+  : S extends { kind: "number" }
+    ? number
+    : S extends { kind: "enum"; values: infer V extends readonly string[] }
+      ? V[number]
+      : S extends { kind: "array"; items: infer I }
+        ? InferSpec<I>[]
+        : S extends { kind: "object"; fields: infer F }
+          ? keyof F extends never
+            ? Record<string, unknown>
+            : InferFields<F>
+          : S extends { kind: "numberMap" }
+            ? Record<string, number>
+            : S extends { kind: "oneOf"; options: readonly (infer O)[] }
+              ? InferSpec<O>
+              : never;
+
+/** The TypeScript type of an object whose fields pass their specs */
+export type InferFields<F> = Simplify<
+  { [K in RequiredKeys<F>]: InferSpec<SpecOf<F[K]>> } & {
+    [K in OptionalKeys<F>]?: InferSpec<SpecOf<F[K]>>;
+  }
+>;
+
+/** An event as written to log.jsonl: ts, type and the schema's fields */
+export type WrittenLogEvent<T extends LogEventType> = Simplify<
+  { ts: string; type: T } & InferFields<(typeof LOG_EVENT_SCHEMAS)[T]["fields"]>
+>;
 
 function describe(spec: FieldSpec): string {
   switch (spec.kind) {
@@ -449,7 +518,7 @@ export type LogEventValidation =
 
 /** Event types the agent may log (runner-only types are left out) */
 export function logEventTypes(): string[] {
-  return Object.entries(LOG_EVENT_SCHEMAS)
+  return Object.entries(SCHEMAS)
     .filter(([, schema]) => !schema.runnerOnly)
     .map(([type]) => type);
 }
@@ -462,9 +531,7 @@ export function validateLogEvent(
   type: string,
   input: unknown,
 ): LogEventValidation {
-  const schema = Object.hasOwn(LOG_EVENT_SCHEMAS, type)
-    ? LOG_EVENT_SCHEMAS[type]
-    : undefined;
+  const schema = Object.hasOwn(SCHEMAS, type) ? SCHEMAS[type] : undefined;
   if (!schema) {
     return {
       valid: false,
@@ -491,7 +558,7 @@ export function validateLogEvent(
 
 /** True when only the runner may write events of this type */
 export function isRunnerOnlyEvent(type: string): boolean {
-  return Object.hasOwn(LOG_EVENT_SCHEMAS, type)
-    ? LOG_EVENT_SCHEMAS[type]?.runnerOnly === true
+  return Object.hasOwn(SCHEMAS, type)
+    ? SCHEMAS[type]?.runnerOnly === true
     : false;
 }

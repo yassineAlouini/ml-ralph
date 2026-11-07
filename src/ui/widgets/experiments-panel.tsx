@@ -5,12 +5,15 @@
 import * as asciichart from "asciichart";
 import { useEffect } from "react";
 import { useAppStore } from "../../application/state/index.ts";
+import type { TypedLogEvent } from "../../domain/log/log-events.ts";
 import type {
   EvalScoring,
-  ExperimentEvent,
   HypothesisWithStatus,
   VerifiedEvals,
 } from "../../infrastructure/ralph/index.ts";
+
+type ExperimentEvent = TypedLogEvent<"experiment">;
+
 import { Box, Text } from "../ink.tsx";
 import { colors } from "../theme/colors.ts";
 import {
@@ -52,7 +55,7 @@ interface ExperimentGroup {
 // --- Helpers ---
 
 function experimentId(exp: ExperimentEvent): string {
-  return `${exp.name}::${exp.hypothesis_id}::${exp.ts}`;
+  return `${exp.name}::${exp.hypothesis_id}::${exp.meta.line}`;
 }
 
 function parseSuccessCriteria(criteria: string[]): ParsedTarget[] {
@@ -189,8 +192,10 @@ function getKeyMetric(
   return first ? { key: first[0], value: first[1] } : null;
 }
 
-function formatRelativeTime(dateStr: string): string {
+function formatRelativeTime(dateStr: string | undefined): string {
+  if (!dateStr) return "-";
   const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return "-";
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -226,7 +231,7 @@ function buildGroups(
   for (const h of hypotheses) {
     const hExps = experiments
       .filter((e) => e.hypothesis_id === h.id)
-      .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+      .sort((a, b) => b.meta.line - a.meta.line);
     if (hExps.length === 0) continue;
     for (const e of hExps) usedExpIds.add(experimentId(e));
     groups.push({
@@ -239,7 +244,7 @@ function buildGroups(
 
   const ungrouped = experiments
     .filter((e) => !usedExpIds.has(experimentId(e)))
-    .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+    .sort((a, b) => b.meta.line - a.meta.line);
   if (ungrouped.length > 0) {
     groups.push({
       hypothesisId: "",
@@ -602,7 +607,7 @@ function HypothesisSparkline({
   evals: VerifiedEvals;
 }) {
   const chronological = [...experiments].sort(
-    (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
+    (a, b) => a.meta.line - b.meta.line,
   );
   const values = chronological
     .map((e) => evalFor(e, evals)?.mean)

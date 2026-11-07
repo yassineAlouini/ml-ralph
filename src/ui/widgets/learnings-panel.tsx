@@ -3,7 +3,10 @@
  * Matches the visual structure of hypotheses-panel.tsx
  */
 
-import type { LearningEvent } from "../../infrastructure/ralph/index.ts";
+import type { TypedLogEvent } from "../../domain/log/log-events.ts";
+
+type LearningEvent = TypedLogEvent<"learning">;
+
 import { Box, Text } from "../ink.tsx";
 import { colors } from "../theme/colors.ts";
 
@@ -67,8 +70,10 @@ function categorizeLearning(insight: string): {
 /**
  * Format relative time
  */
-function formatRelativeTime(dateStr: string): string {
+function formatRelativeTime(dateStr: string | undefined): string {
+  if (!dateStr) return "-";
   const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return "-";
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -108,7 +113,7 @@ export function LearningsPanel({
 
   // Sort by timestamp descending (newest first)
   const sortedLearnings = [...learnings].sort(
-    (a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime(),
+    (a, b) => b.meta.line - a.meta.line,
   );
 
   const total = sortedLearnings.length;
@@ -135,7 +140,10 @@ export function LearningsPanel({
 
       {/* Learnings list */}
       {displayLearnings.map((learning, index) => (
-        <LearningCard key={`${learning.ts}-${index}`} learning={learning} />
+        <LearningCard
+          key={`${learning.meta.line}-${index}`}
+          learning={learning}
+        />
       ))}
     </Box>
   );

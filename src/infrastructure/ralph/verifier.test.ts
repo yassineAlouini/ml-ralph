@@ -5,7 +5,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { LOG_EVENT_SCHEMAS } from "../../domain/validation/log-event.ts";
+import {
+  type Field,
+  LOG_EVENT_SCHEMAS,
+} from "../../domain/validation/log-event.ts";
 import {
   buildVerifierArgs,
   formatVerdictForAgent,
@@ -454,8 +457,11 @@ describe("parseVerdict and formatVerdictForAgent", () => {
 
 describe("verifyCandidate: verdict event validation", () => {
   test("an invalid verifier_verdict event is not appended and goes to onInvalidEvent", async () => {
-    const fields = LOG_EVENT_SCHEMAS.verifier_verdict?.fields;
-    if (!fields) throw new Error("no verifier_verdict schema");
+    // The schema is typed read-only; this test injects a field at runtime
+    const fields = LOG_EVENT_SCHEMAS.verifier_verdict.fields as Record<
+      string,
+      Field
+    >;
     fields.bogus = { spec: { kind: "string" } };
     const stderr = spyOn(process.stderr, "write").mockImplementation(
       () => true,

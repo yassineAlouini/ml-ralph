@@ -11,11 +11,31 @@ import { ExperimentsPanel } from "./experiments-panel.tsx";
 import { HypothesesPanel } from "./hypotheses-panel.tsx";
 import { KanbanPanel } from "./kanban-panel.tsx";
 import { LearningsPanel } from "./learnings-panel.tsx";
+import { PanelBoundary } from "./panel-boundary.tsx";
 import { PrdPanel } from "./prd-panel.tsx";
 import { ResearchPanel } from "./research-panel.tsx";
 import { PlanningTabs } from "./tabs.tsx";
 
 const ITEMS_PER_PAGE = 5;
+
+/** One-line note on log lines the reader skipped or repaired, or null */
+export function formatLogHealth(
+  rejectedLines: number,
+  eventsWithIssues: number,
+): string | null {
+  const parts: string[] = [];
+  if (rejectedLines > 0) {
+    parts.push(
+      `${rejectedLines} log line${rejectedLines === 1 ? "" : "s"} skipped`,
+    );
+  }
+  if (eventsWithIssues > 0) {
+    parts.push(
+      `${eventsWithIssues} event${eventsWithIssues === 1 ? "" : "s"} with issues`,
+    );
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
 
 export function KnowledgePanel() {
   const {
@@ -37,6 +57,10 @@ export function KnowledgePanel() {
     projectPath: projectPath || process.cwd(),
     pollInterval: 2000,
   });
+
+  const logHealth = log
+    ? formatLogHealth(log.rejectedLines, log.eventsWithIssues)
+    : null;
 
   // Map old tab names to new ones for backward compatibility
   const activeTab =
@@ -73,6 +97,12 @@ export function KnowledgePanel() {
                 <Text color={colors.accentPurple}>{log.currentPhase}</Text>
               </>
             )}
+            {logHealth && (
+              <>
+                {" · "}
+                <Text color={colors.accentYellow}>{logHealth}</Text>
+              </>
+            )}
           </Text>
         </Box>
       )}
@@ -101,7 +131,7 @@ export function KnowledgePanel() {
               <Text color={colors.textMuted}>Loading...</Text>
             </Box>
           ) : (
-            <>
+            <PanelBoundary name={activeTab} resetKey={activeTab}>
               {activeTab === "prd" && <PrdPanel prd={prd} />}
               {activeTab === "hypotheses" && (
                 <HypothesesPanel
@@ -152,7 +182,7 @@ export function KnowledgePanel() {
                   limit={ITEMS_PER_PAGE}
                 />
               )}
-            </>
+            </PanelBoundary>
           )}
         </Box>
       </Box>

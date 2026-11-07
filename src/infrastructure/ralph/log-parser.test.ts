@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseLog } from "../../domain/log/log-events.ts";
 import { appendLogLine } from "./log-command.ts";
 import {
   aggregateEvents,
@@ -13,9 +14,14 @@ import {
   readLogFile,
   readPrdFile,
 } from "./log-parser.ts";
-import type { RalphEvent } from "./templates.ts";
 
-const ev = (e: Record<string, unknown>) => e as unknown as RalphEvent;
+/** Events as written to log.jsonl; tests read them back through parseLog */
+type Written = Record<string, unknown>;
+const ev = (e: Written) => e;
+const summarize = (events: Written[]) =>
+  aggregateEvents(
+    parseLog(events.map((e) => JSON.stringify(e)).join("\n")).events,
+  );
 
 const hypothesis = (id: string, ts: string, extra = {}) =>
   ev({
@@ -38,7 +44,7 @@ const experiment = (hypothesisId: string, name = "exp") =>
 
 describe("aggregateEvents", () => {
   test("empty input gives an empty summary", () => {
-    expect(aggregateEvents([])).toEqual({
+    expect(summarize([])).toEqual({
       hypotheses: [],
       experiments: [],
       learnings: [],
@@ -47,6 +53,8 @@ describe("aggregateEvents", () => {
       currentPhase: null,
       phases: [],
       latestStatus: null,
+      rejectedLines: 0,
+      eventsWithIssues: 0,
     });
   });
 
@@ -56,13 +64,13 @@ describe("aggregateEvents", () => {
       ev({ type: "phase", ts: "2", phase: "STRATEGIZE", summary: "b" }),
       ev({ type: "phase", ts: "3", phase: "EXECUTE", summary: "c" }),
     ];
-    const summary = aggregateEvents(events);
+    const summary = summarize(events);
     expect(summary.phases).toHaveLength(3);
     expect(summary.currentPhase).toBe("EXECUTE");
   });
 
   test("hypothesis starts pending with no experiments", () => {
-    const summary = aggregateEvents([hypothesis("H1", "2026-01-01T00:00:00Z")]);
+    const summary = summarize([hypothesis("H1", "2026-01-01T00:00:00Z")]);
     expect(summary.hypotheses).toEqual([
       {
         id: "H1",
@@ -76,7 +84,7 @@ describe("aggregateEvents", () => {
   });
 
   test("typed hypothesis shows its claim and expected delta", () => {
-    const summary = aggregateEvents([
+    const summary = summarize([
       ev({
         type: "hypothesis",
         ts: "1",
@@ -96,7 +104,7 @@ describe("aggregateEvents", () => {
   });
 
   test("experiments are listed and attached to their hypothesis", () => {
-    const summary = aggregateEvents([
+    const summary = summarize([
       hypothesis("H1", "1"),
       experiment("H1", "a"),
       experiment("H1", "b"),
@@ -106,7 +114,7 @@ describe("aggregateEvents", () => {
   });
 
   test("experiment for an unknown hypothesis is kept in the flat list only", () => {
-    const summary = aggregateEvents([experiment("H404")]);
+    const summary = summarize([experiment("H404")]);
     expect(summary.experiments).toHaveLength(1);
     expect(summary.hypotheses).toEqual([]);
   });
@@ -120,14 +128,14 @@ describe("aggregateEvents", () => {
         action,
         reason: "because",
       });
-      const summary = aggregateEvents([hypothesis("H1", "1"), decision]);
+      const summary = summarize([hypothesis("H1", "1"), decision]);
       expect(summary.hypotheses[0]?.status).toBe(action);
       expect(summary.hypotheses[0]?.decision).toMatchObject(decision);
     }
   });
 
   test("decision for an unknown hypothesis is ignored", () => {
-    const summary = aggregateEvents([
+    const summary = summarize([
       ev({
         type: "decision",
         ts: "2",
@@ -148,7 +156,7 @@ describe("aggregateEvents", () => {
         action,
         reason: "",
       });
-    const summary = aggregateEvents([
+    const summary = summarize([
       hypothesis("H1", "1"),
       decide("iterate"),
       decide("keep"),
@@ -157,7 +165,7 @@ describe("aggregateEvents", () => {
   });
 
   test("re-logging a hypothesis id resets it to pending", () => {
-    const summary = aggregateEvents([
+    const summary = summarize([
       hypothesis("H1", "1"),
       experiment("H1"),
       ev({
@@ -177,17 +185,32 @@ describe("aggregateEvents", () => {
     });
   });
 
-  test("hypotheses are sorted by creation time", () => {
-    const summary = aggregateEvents([
+  test("hypotheses are listed in first-seen file order, not by timestamp", () => {
+    const summary = summarize([
       hypothesis("H2", "2026-01-02T00:00:00Z"),
       hypothesis("H1", "2026-01-01T00:00:00Z"),
       hypothesis("H3", "2026-01-03T00:00:00Z"),
+      hypothesis("H2", "2026-01-04T00:00:00Z"),
     ]);
-    expect(summary.hypotheses.map((h) => h.id)).toEqual(["H1", "H2", "H3"]);
+    expect(summary.hypotheses.map((h) => h.id)).toEqual(["H2", "H1", "H3"]);
+  });
+
+  test("a research entry without source is collected, not fatal", () => {
+    const summary = summarize([
+      ev({ type: "research", ts: "1", topic: "t", findings: "f" }),
+    ]);
+    expect(summary.research).toHaveLength(1);
+    expect(summary.research[0]?.source).toBe("");
+    expect(summary.eventsWithIssues).toBe(1);
+  });
+
+  test("rejected lines are counted", () => {
+    const { events, rejected } = parseLog('not json\n{"no_type": 1}');
+    expect(aggregateEvents(events, rejected).rejectedLines).toBe(2);
   });
 
   test("learning and research events are collected in order", () => {
-    const summary = aggregateEvents([
+    const summary = summarize([
       ev({ type: "learning", ts: "1", insight: "L1" }),
       ev({ type: "research", ts: "2", source: "arxiv", insight: "R1" }),
       ev({ type: "learning", ts: "3", insight: "L2", source: "exp" }),
@@ -197,7 +220,7 @@ describe("aggregateEvents", () => {
   });
 
   test("prd_updated maps to prdChanges", () => {
-    const summary = aggregateEvents([
+    const summary = summarize([
       ev({
         type: "prd_updated",
         ts: "t",
@@ -218,12 +241,12 @@ describe("aggregateEvents", () => {
 
   test("latest status event wins", () => {
     const status = (s: string) => ev({ type: "status", ts: "1", status: s });
-    expect(
-      aggregateEvents([status("running"), status("paused")]).latestStatus,
-    ).toBe("paused");
-    expect(
-      aggregateEvents([status("paused"), status("complete")]).latestStatus,
-    ).toBe("complete");
+    expect(summarize([status("running"), status("paused")]).latestStatus).toBe(
+      "paused",
+    );
+    expect(summarize([status("paused"), status("complete")]).latestStatus).toBe(
+      "complete",
+    );
   });
 
   test("event types without a summary slot do not affect the summary", () => {
@@ -283,11 +306,13 @@ describe("aggregateEvents", () => {
       },
     ].map((e) => ev({ ts: "1", ...e }));
 
-    expect(aggregateEvents(ignored)).toEqual(aggregateEvents([]));
+    const { eventsWithIssues: _, ...summary } = summarize(ignored);
+    const { eventsWithIssues: __, ...empty } = summarize([]);
+    expect(summary).toEqual(empty);
   });
 
   test("unknown event types are ignored", () => {
-    const summary = aggregateEvents([
+    const summary = summarize([
       ev({ type: "totally_new", ts: "1" }),
       ev({ type: "learning", ts: "2", insight: "kept" }),
     ]);
@@ -295,7 +320,7 @@ describe("aggregateEvents", () => {
   });
 
   test("a realistic research loop builds the full living plan", () => {
-    const summary = aggregateEvents([
+    const summary = summarize([
       ev({ type: "status", ts: "0", status: "running" }),
       ev({ type: "phase", ts: "1", phase: "UNDERSTAND", summary: "s" }),
       hypothesis("H1", "2"),
@@ -358,7 +383,9 @@ describe("log file I/O", () => {
         "",
       ].join("\n"),
     );
-    expect(await readLogFile(dir)).toEqual([good1, good2] as RalphEvent[]);
+    const events = await readLogFile(dir);
+    expect(events.map((e) => e.ts)).toEqual(["1", "2"]);
+    expect(events.map((e) => e.meta.line)).toEqual([1, 6]);
   });
 
   test("readLogFile tolerates CRLF line endings", async () => {

@@ -10,7 +10,7 @@
  */
 
 import { useMemo } from "react";
-import type { RalphEvent } from "../../infrastructure/ralph/templates.ts";
+import type { LogEvent } from "../../domain/log/log-events.ts";
 import { Box, Text } from "../ink.tsx";
 import { colors } from "../theme/colors.ts";
 import { sanitizeLogText } from "./log-event-formatter.ts";
@@ -108,7 +108,7 @@ function classifyAction(action: string): HypothesisState["status"] {
   return "active";
 }
 
-function extractCognitiveState(logEvents: RalphEvent[]): CognitiveState {
+function extractCognitiveState(logEvents: LogEvent[]): CognitiveState {
   const hypotheses = new Map<string, HypothesisState>();
   let currentPhase: string | null = null;
   let cycleCount = 0;
@@ -139,7 +139,7 @@ function extractCognitiveState(logEvents: RalphEvent[]): CognitiveState {
         const id = String(e.id ?? "?");
         hypotheses.set(id, {
           id,
-          text: String(e.hypothesis ?? ""),
+          text: event.claim,
           status: "active",
           experiments: [],
         });
@@ -294,7 +294,7 @@ function buildHypothesisLines({
 // ── Main Component ─────────────────────────────────────────────────
 
 interface CognitiveMapProps {
-  logEvents: RalphEvent[];
+  logEvents: LogEvent[];
 }
 
 export function CognitiveMap({ logEvents }: CognitiveMapProps) {

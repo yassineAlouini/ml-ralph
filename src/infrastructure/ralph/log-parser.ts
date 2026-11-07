@@ -3,17 +3,14 @@
  * Reads and aggregates events into useful views
  */
 
-import type {
-  DecisionEvent,
-  ExperimentEvent,
-  HypothesisEvent,
-  LearningEvent,
-  PhaseEvent,
-  PRD,
-  PrdUpdatedEvent,
-  RalphEvent,
-  ResearchEvent,
-} from "./templates.ts";
+import {
+  type LogEvent,
+  type ParsedLog,
+  parseLog,
+  type RejectedLine,
+  type TypedLogEvent,
+} from "../../domain/log/log-events.ts";
+import type { PRD } from "./templates.ts";
 
 export interface HypothesisWithStatus {
   id: string;
@@ -22,13 +19,13 @@ export interface HypothesisWithStatus {
   rubrics?: string[];
   killCriterion?: string;
   status: "pending" | "keep" | "reject" | "iterate" | "pivot";
-  experiments: ExperimentEvent[];
-  decision?: DecisionEvent;
+  experiments: TypedLogEvent<"experiment">[];
+  decision?: TypedLogEvent<"decision">;
   createdAt: string;
 }
 
 export interface PrdChange {
-  ts: string;
+  ts?: string;
   field: string;
   change: string;
   reason: string;
@@ -36,55 +33,36 @@ export interface PrdChange {
 
 export interface LogSummary {
   hypotheses: HypothesisWithStatus[];
-  experiments: ExperimentEvent[];
-  learnings: LearningEvent[];
-  research: ResearchEvent[];
+  experiments: TypedLogEvent<"experiment">[];
+  learnings: TypedLogEvent<"learning">[];
+  research: TypedLogEvent<"research">[];
   prdChanges: PrdChange[];
   currentPhase: string | null;
-  phases: PhaseEvent[];
+  phases: TypedLogEvent<"phase">[];
   latestStatus: "running" | "paused" | "complete" | null;
+  /** Lines the reader could not use at all (not JSON, no type) */
+  rejectedLines: number;
+  /** Events the reader had to repair (see LogMeta.issues) */
+  eventsWithIssues: number;
 }
 
 /**
- * Parse a single line of JSONL
+ * Read log.jsonl: events in file order plus the lines that could not be read.
+ * A missing or unreadable file reads as an empty log.
  */
-function parseLine(line: string): RalphEvent | null {
+export async function readLog(projectPath: string): Promise<ParsedLog> {
   try {
-    const trimmed = line.trim();
-    if (!trimmed) return null;
-    return JSON.parse(trimmed) as RalphEvent;
+    const file = Bun.file(`${projectPath}/.ml-ralph/log.jsonl`);
+    if (!(await file.exists())) return { events: [], rejected: [] };
+    return parseLog(await file.text());
   } catch {
-    return null;
+    return { events: [], rejected: [] };
   }
 }
 
-/**
- * Read and parse the log file
- */
-export async function readLogFile(projectPath: string): Promise<RalphEvent[]> {
-  const logPath = `${projectPath}/.ml-ralph/log.jsonl`;
-
-  try {
-    const file = Bun.file(logPath);
-    if (!(await file.exists())) {
-      return [];
-    }
-
-    const content = await file.text();
-    const lines = content.split("\n");
-    const events: RalphEvent[] = [];
-
-    for (const line of lines) {
-      const event = parseLine(line);
-      if (event) {
-        events.push(event);
-      }
-    }
-
-    return events;
-  } catch {
-    return [];
-  }
+/** Read log.jsonl events in file order (see readLog for the rejected lines) */
+export async function readLogFile(projectPath: string): Promise<LogEvent[]> {
+  return (await readLog(projectPath)).events;
 }
 
 /**
@@ -160,154 +138,102 @@ export async function readKanbanFile(
   }
 }
 
+/** Text of a v0.4.5 hypothesis `expected` field, which the schema dropped */
+function legacyExpected(h: TypedLogEvent<"hypothesis">): string | undefined {
+  const expected = h.meta.raw.expected;
+  return typeof expected === "string" && expected.trim() ? expected : undefined;
+}
+
 /**
- * Aggregate events into a summary for the TUI
+ * Aggregate events into a summary for the TUI. Events are taken in file
+ * order; hypotheses are listed in the order they first appear.
  */
-export function aggregateEvents(events: RalphEvent[]): LogSummary {
+export function aggregateEvents(
+  events: LogEvent[],
+  rejected: RejectedLine[] = [],
+): LogSummary {
   const hypothesesMap = new Map<string, HypothesisWithStatus>();
-  const experiments: ExperimentEvent[] = [];
-  const learnings: LearningEvent[] = [];
-  const research: ResearchEvent[] = [];
+  const experiments: TypedLogEvent<"experiment">[] = [];
+  const learnings: TypedLogEvent<"learning">[] = [];
+  const research: TypedLogEvent<"research">[] = [];
   const prdChanges: PrdChange[] = [];
-  const phases: PhaseEvent[] = [];
+  const phases: TypedLogEvent<"phase">[] = [];
   let latestStatus: "running" | "paused" | "complete" | null = null;
 
   for (const event of events) {
     switch (event.type) {
       case "hypothesis": {
-        const h = event as HypothesisEvent;
-        hypothesesMap.set(h.id, {
-          id: h.id,
-          hypothesis: h.claim ?? h.hypothesis ?? "",
+        // Re-logging an id resets it; the Map keeps its first-seen position
+        hypothesesMap.set(event.id, {
+          id: event.id,
+          hypothesis: event.claim,
           expected:
-            h.expected_delta !== undefined
-              ? `Δ ${h.expected_delta > 0 ? "+" : ""}${h.expected_delta}`
-              : h.expected,
-          rubrics: h.rubrics,
-          killCriterion: h.kill_criterion,
+            event.expected_delta !== undefined
+              ? `Δ ${event.expected_delta > 0 ? "+" : ""}${event.expected_delta}`
+              : legacyExpected(event),
+          rubrics: event.rubrics.length > 0 ? event.rubrics : undefined,
+          killCriterion: event.kill_criterion || undefined,
           status: "pending",
           experiments: [],
-          createdAt: h.ts,
+          createdAt: event.ts ?? "",
         });
         break;
       }
 
       case "experiment": {
-        const e = event as ExperimentEvent;
-        experiments.push(e);
-        const hyp = hypothesesMap.get(e.hypothesis_id);
-        if (hyp) {
-          hyp.experiments.push(e);
-        }
+        experiments.push(event);
+        hypothesesMap.get(event.hypothesis_id)?.experiments.push(event);
         break;
       }
 
       case "decision": {
-        const d = event as DecisionEvent;
-        const hyp = hypothesesMap.get(d.hypothesis_id);
+        const hyp = hypothesesMap.get(event.hypothesis_id);
         if (hyp) {
-          hyp.status = d.action;
-          hyp.decision = d;
+          if (event.action) hyp.status = event.action;
+          hyp.decision = event;
         }
         break;
       }
 
-      case "learning": {
-        learnings.push(event as LearningEvent);
+      case "learning":
+        learnings.push(event);
         break;
-      }
 
-      case "research": {
-        research.push(event as ResearchEvent);
+      case "research":
+        research.push(event);
         break;
-      }
 
-      case "prd_updated": {
-        const p = event as PrdUpdatedEvent;
+      case "prd_updated":
         prdChanges.push({
-          ts: p.ts,
-          field: p.field,
-          change: p.change,
-          reason: p.reason,
+          ts: event.ts,
+          field: event.field,
+          change: event.change,
+          reason: event.reason,
         });
         break;
-      }
 
-      case "phase": {
-        phases.push(event as PhaseEvent);
+      case "phase":
+        phases.push(event);
         break;
-      }
 
-      case "status": {
-        latestStatus = (event as { status: "running" | "paused" | "complete" })
-          .status;
+      case "status":
+        if (event.status) latestStatus = event.status;
         break;
-      }
     }
   }
 
-  // Convert map to array, sorted by creation time
-  const hypotheses = Array.from(hypothesesMap.values()).sort((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
-
-  // Get current phase (latest)
   const lastPhase = phases[phases.length - 1];
-  const currentPhase = lastPhase?.phase ?? null;
 
   return {
-    hypotheses,
+    hypotheses: Array.from(hypothesesMap.values()),
     experiments,
     learnings,
     research,
     prdChanges,
-    currentPhase,
+    currentPhase: lastPhase?.phase ?? null,
     phases,
     latestStatus,
-  };
-}
-
-/**
- * Watch the log file for changes and call callback
- */
-export function watchLogFile(
-  projectPath: string,
-  callback: (summary: LogSummary) => void,
-): () => void {
-  const logPath = `${projectPath}/.ml-ralph/log.jsonl`;
-  const watcher: ReturnType<typeof Bun.file.prototype.watch> | null = null;
-
-  const refresh = async () => {
-    const events = await readLogFile(projectPath);
-    const summary = aggregateEvents(events);
-    callback(summary);
-  };
-
-  // Initial load
-  refresh();
-
-  // Set up file watcher using polling (more reliable across platforms)
-  let lastSize = 0;
-  const interval = setInterval(async () => {
-    try {
-      const file = Bun.file(logPath);
-      if (await file.exists()) {
-        const size = file.size;
-        if (size !== lastSize) {
-          lastSize = size;
-          await refresh();
-        }
-      }
-    } catch {
-      // Ignore errors
-    }
-  }, 1000); // Poll every second
-
-  // Return cleanup function
-  return () => {
-    clearInterval(interval);
-    if (watcher) {
-      // Clean up watcher if we add native watching later
-    }
+    rejectedLines: rejected.length,
+    eventsWithIssues: events.filter((e) => e.meta.issues.length > 0).length,
   };
 }

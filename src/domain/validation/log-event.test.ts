@@ -134,12 +134,12 @@ describe("validateLogEvent", () => {
 });
 
 describe("schema coverage", () => {
-  test("has a schema for every event type in templates.ts", async () => {
+  test("every event type templates.ts exports has a schema", async () => {
     const source = await Bun.file(
       `${import.meta.dir}/../../infrastructure/ralph/templates.ts`,
     ).text();
     const documented = new Set(
-      [...source.matchAll(/^\s+type: "([a-z_]+)";$/gm)].map((m) => m[1]),
+      [...source.matchAll(/WrittenLogEvent<"([a-z_]+)">/g)].map((m) => m[1]),
     );
     expect(documented.size).toBeGreaterThan(15);
     for (const type of documented) {
